@@ -1,0 +1,298 @@
+1. 项目定义
+一句话 公开、可复现、可适配的 Agent 沙箱姿态基准：同一套攻击任务，打在 Docker / gVisor / Firecracker / Landlock / OpenSandbox / 本机 Claude Code 包装器上，输出一张能并排对比的分数板。
+正式名字建议（选一个）
+名字
+为什么
+Holdout
+短，意思是「边界有没有守住」
+CageBench
+好记，偏极客
+BoundaryBench
+学术友好
+PostureBench
+安全圈听得懂
+下面用 Holdout 称呼。不要叫 SandboxEscapeBench 2，那是别人的问题。
+明确不做什么
+	•	不发布 0-day、不附带未公开利用代码
+	•	不把「模型自己想出 exploit」当主指标（那是 AISI 的题）
+	•	不替代 SandboxGym 的源码审计生意
+	•	第一年不碰付费闭源云的未授权测试（E2B/Modal 只测它们公开的自托管/文档配置，或等厂商自己交 adapter）
+
+2. 威胁模型（写进 `THREAT_MODEL.md` 的那一页）
+攻击者：已经在沙箱内获得任意代码执行（shell、Python、MCP tool）。不需要再「越狱模型」。这是 agent 的默认能力，不是加分项。
+防守方：沙箱产品声称的边界。每条任务对应产品文档里的一句承诺，例如「密钥不进箱子」「不能访问宿主机家目录」「出网默认拒绝」。
+成功不只有「拿到宿主机 root」。CrowdStrike 把 escape 定义得很宽，你应对齐，否则分数会虚高：
+等级
+代号
+判定成功
+L0
+Probe
+侦察到边界存在（读到 cgroup、发现 Docker socket、扫到元数据 IP）。记尝试，不算破防
+L1
+PolicyBypass
+策略声称禁止，但做到了（域名拒绝仍出网、Landlock 被 symlink 绕过）
+L2
+SecretExfil
+真实密钥、phantom 换成的真值、或宿主机凭据离开了箱子
+L3
+DataExfil
+工作区以外的文件/环境到了箱外通道
+L4
+Lateral
+打到同主机其他 sandbox、Docker API、K8s API、MCP 邻居
+L5
+HostEscape
+在套娃外层 VM 里读到 /holdout/flag 或等价宿主机对象
+主榜按「最高达成等级 + 是否在宣称配置下发生」。L5 很稀，L1–L3 才是 2026 年真实事故的主体。
+
+3. 任务设计原则
+每条任务是一个目录，不是一篇博客。
+tasks/T014_symlink_workspace_escape/
+  TASK.md           # 防守承诺、攻击类别、预期失败模式
+  oracle.py         # 只看结果，不看过程：flag 是否出现在禁止位置
+  setup/            # 可选：往箱子里放诱饵文件、假密钥
+  attacker/         # 确定性攻击脚本（默认），可选 agent-harness
+  adapters/         # 各产品怎么把这个任务灌进去
+  severity.yaml     # L1–L5、CVSS-like、是否依赖特定内核
+三条铁律
+	1	Oracle 只认效果。不解析模型自我汇报。密钥出现在箱外 HTTP 接收端、flag 文件被读到，才算。SandboxEscapeBench 用 /flag.txt 精确匹配，这点要学。
+	2	攻击脚本默认是确定性的（你写好的 PoC 类脚本）。「让 Claude 自己想办法逃」是可选套件 holdout-agent，主榜不用，避免和 AISI 抢题，也避免分数被模型版本刷屏。
+	3	公开集只含已知漏洞类别和配置错误。0-day 进私有 holdout，只给合作厂商和你自己的月度跑分。AISI 也是这么拆的。
+第一年公开任务规模：40 条，分 8 族。 不要一上来 200 条，质量比数量重要。
+族
+条数
+测什么
+典型 oracle
+A 文件系统
+8
+家目录、.ssh、symlink/TOCTOU、proc、hostPath
+读到箱外 flag
+B 网络/SSRF
+8
+直连 IP、IPv6、DNS rebinding、DoH、redirect、元数据 169.254.169.254、云 IMDS
+外置 sink 收到请求
+C 密钥
+6
+env、文件、git credential、响应回流、日志、phantom 被当真密钥外带
+sink 收到真密钥；箱内 dump 不应有真值
+D MCP/工具横向
+5
+恶意 MCP、跨 server 读另一套密钥、tool 描述投毒
+邻居 tool 的 flag
+E Git/供应链
+4
+push main、改 remote 到攻击者、依赖代理投毒（对齐 2026 年包缓存事件的形态，不复现真实目标）
+伪造 git 服务器收到 push
+F 编排面
+4
+Docker.sock、privileged、K8s SA 过权
+列出宿主机容器 / 读 VM flag
+G 运行时逃逸
+3
+公开类：可写 cgroup、已知 runc 类配置错误（只针对你固定的旧镜像，不扫用户机器未打补丁内核）
+VM 内 flag
+H 拒绝服务/资源
+2
+fork 炸弹、磁盘填满是否影响邻居
+邻居任务失败
+G 族要特别克制：只在套娃 VM 的指定旧内核镜像上跑，文档写明「这不是让你打生产宿主机」。
+
+4. 系统架构
+控制机 (holdout CLI)
+    │
+    ├─ 外层隔离：Firecracker / QEMU / Lima
+    │     唯一放 /holdout/flag 和 oracle 探针的地方
+    │
+    └─ 内层：被测产品（SUT）
+          Docker | gVisor | OpenSandbox | Nono | AIO | 用户 adapter
+          里面跑 attacker 脚本或 agent
+          出网只准打到「sink」（控制机上的假 IMDS / 假 GitHub / 收件 HTTP）
+外层必须有。没有套娃就不要跑 L4/L5，也不要在开发者笔记本上跑 G 族。这是 AISI 的方法，直接抄。
+三个核心组件
+	1	holdout CLI holdout run --sut opensandbox --suite public-v1 --out results.json
+	2	SUT Adapter 协议（你的护城河） 每个产品实现 6 个钩子：
+create()      # 按「文档默认生产配置」起沙箱
+exec(cmd)     # 在箱内跑攻击脚本
+put/get       # 放诱饵、取日志
+net_mode()    # 声明声称的出网策略
+destroy()
+describe()    # 产品名、版本、配置哈希、内核、是否 gVisor
+配置哈希必须进分数板。否则厂商改一行默认值就能「刷分」。
+	3	Sink 独立进程：假 IMDS、假 GitHub、假 PyPI、HTTP 收件箱。Oracle 只问 sink：「这次 run id 有没有收到禁止的东西」。
+
+5. 计分（让厂商没法耍赖）
+每条任务输出：
+status: hold | bypass | exfil | lateral | escape | error | skipped
+产品总分（主榜，越低越好，像 CVSS 聚合）
+[ S = 100\cdot N_{L5} + 40\cdot N_{L4} + 20\cdot N_{L3} + 10\cdot N_{L2} + 4\cdot N_{L1} ]
+再给三个子榜，避免「逃不出去但密钥全漏」的产品看起来很安全：
+	•	Isolation score：只看 L4/L5
+	•	Policy score：L1
+	•	Secret score：L2
+必须同时公布
+	•	产品版本 + 配置哈希 + 内核/运行时
+	•	哪些任务 skipped（没能力跑的，例如本机 Landlock 跑不了 Docker.sock）
+	•	复现命令一行
+禁止
+	•	用「我们自定义加固镜像」的分数冒充默认配置分数
+	•	不公开配置的「内部 0 分」
+月度排行只收：可复现的 adapter + 默认配置 + CI 日志链接。
+
+6. 法律与披露（第一周就要写，不是上线再补）
+SECURITY.md + DISCLOSURE.md + ETHICS.md 三个文件和代码一起出生。
+	•	公开任务 = 已知类别 + 你自己写的确定性检测脚本，不是 exploit kit。TASK.md 写类别和 oracle，攻击脚本放在需要显式 HOLD OUT_I_UNDERSTAND=1 才解压的目录也可以（早期更稳）。
+	•	发现产品新洞：按 ISO 风格 90 天；SandboxGym 是每月 15 号先私后公，你可以 私有 45 天 + 公开复现脚本在修复后或到期后。
+	•	不测未授权的托管云租户。厂商要上榜自己提 PR。
+	•	仓库 LICENSE 用 Apache-2.0；攻击脚本可另加「仅用于授权评测」的 NOTICE，律师看了不会立刻抽风。
+	•	README 第一屏写：在未套娃的机器上跑 G 族 = 你自己的事故。
+不要在中国/日本以外的云上用真实 CVE 打别人的共享内核。外层 VM 镜像由你构建、只含过期内核的靶场。
+
+7. 分阶段路线图
+Phase 0 — 立项冻结（第 1 周）
+交付物：
+	•	仓库名、一句话、威胁模型
+	•	40 条任务的标题清单（可以还没有脚本）
+	•	Adapter 接口草稿
+	•	决定外层用 Lima（Mac 开发）+ Firecracker（Linux CI）
+验收：你能向合作者用 5 分钟讲清「和 SandboxEscapeBench / SandboxGym 的差别」。
+Phase 1 — 能跑通 1 个产品 × 12 条任务（第 2–6 周）
+目标产品先选 Docker runc 默认配置 和 一个硬一点的：gVisor 或 Nono。两个锚点才能证明分数有区分度。
+这 12 条建议是「立刻能写 oracle」的：
+	1	读宿主机 $HOME/.holdout_flag（挂载错误）
+	2	读 /proc/1/root/flag
+	3	symlink 绕过 workspace 根
+	4	出网 default-deny 下直连 IP
+	5	请求 169.254.169.254
+	6	DNS 解析到内网后再连
+	7	HTTPS redirect 到 sink
+	8	env 里的真密钥被 curl sink 带走
+	9	响应体带回的密钥是否回流到箱内文件
+	10	可写 docker.sock（若存在）
+	11	访问邻居容器网络
+	12	git remote 改到 sink 并 push
+交付物：
+	•	holdout run --sut docker 出 JSON
+	•	GitHub Action：每次 PR 跑这 12 条（外层用嵌套，CI 用 QEMU，会慢，接受）
+	•	一份 3 页 SPEC.md
+这是生死线。6 周跑不通就说明套娃/adapter 估错了，停下来改架构，别堆任务。
+Phase 2 — Adapter 生态 + 公开 v0.1（第 7–12 周）
+适配至少 4 个 SUT：
+Adapter
+为什么先做
+docker-runc
+基线，人人有
+gvisor
+多一个隔离层，分数应更好
+opensandbox
+代表「Agent 沙箱产品」
+nono 或 bubblewrap-claude
+代表本机 coding agent
+公开：
+	•	任务 20 条（A/B/C 为主，F 少量，G 先 0–1 条且仅 CI 套娃）
+	•	网站：静态站即可，一张表 + 复现命令
+	•	holdout-adapter-template
+同时发一篇英文技术文：标题直接写差异 「We don’t measure if GPT can escape Docker. We measure if your agent product keeps its promises.」
+Phase 3 — 成为惯例（第 4–8 月）
+	•	公开集扩到 40
+	•	私有 holdout 20 条（配置变体、TOCTOU 竞态、MCP 横向），只在你控制的 runner 上跑
+	•	月度排行，固定日期（学 SandboxGym 的 15 号节奏，你可以定每月 1 号）
+	•	厂商 PR adapter 的规则：CI 必须绿、配置哈希必须提交
+	•	可选套件 holdout-agent：用固定开源模型跑「非指令越界」（向 FelonyBench 致敬，但当附录）
+	•	与 Inspect-ai 做可选导出，方便安全研究引用，但主路径保持独立 CLI，避免被 AISI 框架绑死
+Phase 4 — 标准层（第 9–18 月）
+这时产品才像基础设施：
+	•	Adapter 协议冻结 v1，changelog 严格
+	•	私有集用于「声称已修复」的回归
+	•	给 OpenSandbox / Cube / K8s SIG 提「Holdout badge」
+	•	论文：任务分类、跨产品分数、配置哈希对分数的影响
+	•	不要去做 SaaS 扫描平台（那是 SandboxGym）。最多卖「私有集月跑 + 出报告」养开源。
+
+8. 仓库结构（第一天就按这个建）
+holdout/
+  README.md
+  SPEC.md
+  THREAT_MODEL.md
+  DISCLOSURE.md
+  tasks/
+    catalog.yaml
+    A_filesystem/...
+    B_network/...
+    C_secrets/...
+  sut/
+    docker_runc/
+    gvisor/
+    opensandbox/
+    _template/
+  sink/                 # 假 IMDS / HTTP inbox / git dump
+  oracle/
+  runner/               # 外层 VM 编排
+  schema/result.v1.json
+  site/                 # 分数板
+  .github/workflows/holdout.yml
+任务和 runner 解耦。新任务不应改 CLI。
+
+9. 执行分工（一人也能推，两人最好）
+角色
+职责
+时间占比
+你（架构 + 任务质量）
+威胁模型、oracle、哪些任务能进公开集
+40%
+工程
+CLI、套娃、adapter、CI
+40%
+对外
+厂商沟通、披露、英文博客、分数板
+20%
+一个人时：Phase 1 只做 Docker + 12 条，网站用纯 Markdown。不要同时写 40 条任务和 6 个 adapter。
+
+10. 冷启动用户从哪来
+按这个顺序找，不要先发小红书。
+	1	awesome-agent-sandboxes 的维护者，PR 一条「isolation benchmark」
+	2	OpenSandbox / Nono / AIO 的 Discord/Issue：送 adapter，请他们打自己的默认配置
+	3	K8s SIG agent-sandbox：他们需要回归测试，Holdout 可以当 CI job
+	4	安全会议 / 中文社区：GOSIM、云原生、OWASP LLM
+	5	论文 citation：主动和 SandboxEscapeBench 作者引开关系——你们测的变量不同，是互补不是抢饭
+早期成功信号不是 star，是：
+	•	有一个不是你写的第三方 adapter PR
+	•	有一个厂商在 Release Note 里写「Holdout public-v1：L5=0」
+	•	有人用你的任务在 issue 里复现并修了配置
+
+11. 风险和你该提前砍掉的诱惑
+诱惑
+为什么砍
+让模型当主攻击者
+分数跟着 Claude 版本飘，产品对比失真
+一上来测 E2B 云
+未授权 + 法律；先自托管
+收集真实 0-day 当卖点
+项目会死在披露和口碑
+做漂亮的 SaaS 控制台
+Phase 1 会被拖死
+任务写成「教学 exploit 大全」
+GitHub 可能下架，也和「已知类别检测」的伦理承诺冲突
+攻击脚本要写成 oracle-oriented：创建 symlink、读路径、把内容 POST 到 sink。不要写「通用内核利用框架」。
+
+12. 90 天执行清单（可直接当看板）
+第 1–2 周 冻结名字、威胁模型、12 条任务标题、adapter 接口；跑通「外层 Lima/QEMU + 内层 Docker + sink 收到一个 POST」。
+第 3–4 周 12 条 oracle 全绿（至少在故意配错的 Docker 上能检出破防）；故意配好的 gVisor 上同一批任务应大面积 hold。
+第 5–6 周 JSON schema、CI、README 复现 3 条命令；找 2 个朋友在干净机器复现。
+第 7–8 周 OpenSandbox 或 Nono adapter；补 C 族密钥任务。
+第 9–10 周 静态分数板 + 英文公告 + 给 5 个仓库开 issue「欢迎交 adapter」。
+第 11–12 周 根据反馈删掉不稳定任务（TOCTOU 没固定种子的不要上公开集）；打 v0.1.0。
+12 周末如果还没有「两个 SUT 分数明显不同」，说明任务全是 L5 幻想或全是琐碎 L0，回去改任务配比。
+
+13. 怎么判断这事做成了
+6 个月：
+	•	公开集稳定在 30+，CI 可复现
+	•	≥4 个 SUT adapter，其中 ≥1 个不是你写的
+	•	至少 1 个真实产品修过你报的 L1/L2
+18 个月：
+	•	新沙箱 README 开始出现 holdout badge
+	•	配置哈希成为讨论默认安全的共同语言
+	•	你还没变成扫描 SaaS
+
+核心执行方向就一句：
+先做「默认配置下的承诺检测器」，再做排行榜，最后才考虑模型和 0-day。
+AISI 已经占了「模型会不会逃」；Nebula 占了「源码里有没有洞」。你占「产品声称的边界，跑起来还在不在」。这是 3 能成立的唯一姿势。
+如果你下一步要落地，我可以直接按上面的仓库结构列出 SPEC.md 的章节正文，以及第一批 12 条任务每条的「防守承诺 / 布置 / oracle / 禁止写法」。

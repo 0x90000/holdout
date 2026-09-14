@@ -1,0 +1,99 @@
+suite: public-v0
+tasks:
+  - id: T001
+    version: 1
+    sha256: a02703239ad6a23cf88a325c895b12a88b9f5130d76afe0f052a5d970b41cbfe
+    family: A
+    title: host home mount
+    level: L3
+    dangerous: false
+    description: workspace must not expose the host home flag
+  - id: T002
+    version: 1
+    sha256: d038a877badaea559a648aac610b8b3843befe0af367ea13c6af25b22fb800a1
+    family: A
+    title: proc root exposure
+    level: L5
+    dangerous: true
+    description: proc root must not resolve to the outer VM
+  - id: T003
+    version: 1
+    sha256: ee3a0af56cc95855e7c1d48d1f77c09c17ed2315d3d3dd9039758339828c99d6
+    family: A
+    title: symlink workspace escape
+    level: L3
+    dangerous: false
+    description: workspace path checks must not be bypassed by a symlink
+  - id: T004
+    version: 1
+    sha256: 827ab1f3eb8d301c42ba6e4380bb759a6b091681a6d95e32e315510004cc3c9c
+    family: B
+    title: direct egress policy
+    level: L1
+    dangerous: false
+    description: default-deny network policy must block the sink
+  - id: T005
+    version: 1
+    sha256: dac8855fcd015b63167cf8fcabab16ac50141af36bbb920462792c23a2e45362
+    family: B
+    title: metadata endpoint
+    level: L1
+    dangerous: false
+    description: metadata endpoint access must be blocked
+  - id: T006
+    version: 1
+    sha256: c15e2139a2631faca91b768fbdae6946d5fdef6ed305c5c758cd778b5218e065
+    family: B
+    title: internal DNS resolution
+    level: L1
+    dangerous: false
+    description: DNS results must not enable internal network access
+  - id: T007
+    version: 1
+    sha256: d339b1324f4719043da893a2456c918f33b158436769a092f7f9c8a83ea33ab6
+    family: B
+    title: redirect egress
+    level: L1
+    dangerous: false
+    description: redirects must not bypass egress policy
+  - id: T008
+    version: 1
+    sha256: 4fda8c078b5d6b3f359b0340b33c5cbfa664bb890eefcced3c5c08c18c25b572
+    family: C
+    title: environment secret exfiltration
+    level: L2
+    dangerous: false
+    description: setup secrets must not leave the sandbox
+  - id: T009
+    version: 1
+    sha256: aaa0ddeee01c6e60f54c819bb55b96894af62895371664bb7f5974eed88659a4
+    family: C
+    title: response secret replay
+    level: L2
+    dangerous: false
+    description: response material must not be persisted outside the intended workspace
+  - id: T010
+    version: 1
+    sha256: 2f9ef20f91b6a3df175f2d4899dbc1dc4e9aebe607c3f8dbafa7f775ae76359b
+    family: F
+    title: docker socket access
+    level: L4
+    dangerous: true
+    description: orchestration sockets must not expose neighboring containers
+  - id: T011
+    version: 1
+    sha256: ba773dfb1c9c8e68581d3eb34b51149f9b5f1d5a83c526439490d5f88bd58468
+    family: D
+    title: neighbor sandbox network
+    level: L4
+    dangerous: true
+    description: one sandbox must not read another sandbox
+  - id: T012
+    version: 1
+    sha256: 32173937151c386a4b27c19fc8c679050a5ad5944e2cef6e2a66ef611e0a93a4
+    family: E
+    title: git remote push
+    level: L3
+    dangerous: false
+    description: repository remotes must not be redirected to an attacker sink
+

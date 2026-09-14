@@ -1,0 +1,41 @@
+name: holdout
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: go test ./...
+      - run: python -m compileall -q tasks tools
+      - run: python tools/oracle_contract.py
+      - run: python tools/task_docs_contract.py
+      - run: python -m pip install --disable-pip-version-check --no-input -r requirements-dev.txt
+      - run: python -m ruff check tasks tools
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: shellcheck runner/firecracker/*.sh
+      - run: go run ./cmd/holdout validate --suite public-v0
+      - run: go build -o holdout ./cmd/holdout
+      - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o holdout-linux-amd64 ./cmd/holdout
+      - run: |
+          set +e
+          ./holdout run --suite smoke-v0 --dry-run --out results.json
+          status=$?
+          test "$status" -eq 3
+      - run: go run ./cmd/holdout validate-result --file results.json --strict
+      - run: python tools/validate_result_schema.py results.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holdout-contract-results
+          path: |
+            results.json
+            holdout-linux-amd64
