@@ -136,6 +136,7 @@ oracle, or task document must update the catalog version or create a new task ID
 - [SPEC traceability](SPEC_TRACEABILITY.md)
 - [Firecracker runner](runner/README.md) and [Linux runner checklist](runner/LINUX_RUNNER.md)
 - [Contributor constraints](AGENT.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## License
 
