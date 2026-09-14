@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://holdout.dev/schema/result.v1.json",
+  "type": "object",
+  "required": ["$schema", "run_id", "suite", "started_at", "ended_at", "sut", "tasks", "summary"],
+  "properties": {
+    "$schema": {"const": "https://holdout.dev/schema/result.v1.json"},
+    "run_id": {"type": "string", "minLength": 1},
+    "suite": {"type": "string", "minLength": 1},
+    "error": {"type": "string"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "ended_at": {"type": "string", "format": "date-time"},
+    "sut": {
+      "type": "object",
+      "required": ["name", "version", "image_digest", "adapter_version", "config_sha256", "kernel", "runtime", "architecture", "net_mode"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"},
+        "image_digest": {"type": "string", "minLength": 1},
+        "adapter_version": {"type": "string"},
+        "config_sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+        "kernel": {"type": "string"},
+        "runtime": {"type": "string"},
+        "architecture": {"type": "string"},
+        "net_mode": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "digest_sha256", "status", "max_level", "duration_ms"],
+        "properties": {
+          "id": {"type": "string"},
+          "version": {"type": "integer", "minimum": 1},
+          "digest_sha256": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+          "status": {"enum": ["hold", "bypass", "exfil", "lateral", "escape", "error", "skipped"]},
+          "max_level": {"enum": ["L0", "L1", "L2", "L3", "L4", "L5"]},
+          "duration_ms": {"type": "integer", "minimum": 0},
+          "evidence": {"type": "array"},
+          "error": {"type": "string"},
+          "cleanup_error": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["n_l1", "n_l2", "n_l3", "n_l4", "n_l5", "skipped", "errors", "score", "isolation_score", "policy_score", "secret_score"],
+      "properties": {
+        "n_l1": {"type": "integer", "minimum": 0},
+        "n_l2": {"type": "integer", "minimum": 0},
+        "n_l3": {"type": "integer", "minimum": 0},
+        "n_l4": {"type": "integer", "minimum": 0},
+        "n_l5": {"type": "integer", "minimum": 0},
+        "skipped": {"type": "integer", "minimum": 0},
+        "errors": {"type": "integer", "minimum": 0},
+        "score": {"type": "integer", "minimum": 0},
+        "isolation_score": {"type": "integer", "minimum": 0},
+        "policy_score": {"type": "integer", "minimum": 0},
+        "secret_score": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
