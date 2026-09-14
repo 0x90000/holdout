@@ -1,0 +1,9 @@
+Holdout
+Copyright 2026 Holdout contributors
+
+Holdout is an open benchmark for evaluating Agent sandbox posture under
+authorized, reproducible tests. The notices in this file are informational
+and do not modify the Apache License, Version 2.0.
+
+Third-party dependencies and container images retain their own licenses and
+attributions. See the corresponding dependency metadata and SBOM for details.

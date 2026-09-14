@@ -1,0 +1,11 @@
+/bin/
+/bin/holdout-contract
+/bin/holdout-contract.exe
+/bin/contract-results.json
+/results*.json
+/dry-results.json
+/holdout-contract.exe
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage

@@ -1,0 +1,2 @@
+jsonschema==4.23.0
+ruff==0.13.3
